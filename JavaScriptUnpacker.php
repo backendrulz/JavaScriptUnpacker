@@ -2,7 +2,8 @@
 /**
  * JavaScriptUnpacker.php
  * @author Andrey Izman <izmanw@gmail.com>
- * @link https://github.com/mervick/JavaScriptUnpacker
+ * @author Cristian Ferreyra <@backendrulz>
+ * @link https://github.com/backendrulz/JavaScriptUnpacker
  * @license MIT
  */
 
@@ -17,11 +18,6 @@ class JavaScriptUnpacker
     protected static $JS_FUNC = 'eval(function(p,a,c,k,e,';
 
     /**
-     * @var string
-     */
-    protected $script;
-
-    /**
      * @param $script
      * @return string
      */
@@ -32,10 +28,10 @@ class JavaScriptUnpacker
 
     /**
      * @param $script
+     * @param string $script
      */
-    protected function __construct($script)
+    protected function __construct(protected $script)
     {
-        $this->script = $script;
     }
 
     /**
@@ -52,11 +48,11 @@ class JavaScriptUnpacker
             (preg_match('/^,([0-9]+),([0-9]+),$/', preg_replace('/[\x03-\x20]+/', '',
                 substr($params, $offset, $pos - $offset)), $matches)))
         {
-            list(, $ascii, $count) = $matches;
+            [, $ascii, $count] = $matches;
             $packed = str_replace('\\' . $quote, $quote, $packed);
             $decode = 'decode' . self::detectEncoding($body);
             $script = $this->$decode($packed, $ascii, $count, explode('|', $keywords));
-            $script = str_replace('\\\\', '\\', $script);
+            $script = str_replace('\\\\', '\\', (string) $script);
             if (self::isDoubleEscaped($script)) {
                 $script = str_replace(['\\\'', '\\"', '\\\\\'', '\\\\"', '\\\\'],
                     ['\'', '"', '\\\\\'', '\\\\"', '\\'],  $script);
@@ -73,9 +69,7 @@ class JavaScriptUnpacker
      */
     protected static function replaceSpecials($str)
     {
-        $replace = function($str) {
-            return str_replace(['\n', '\r', '\t'], ["\n", "\r", "\t"], $str);
-        };
+        $replace = fn($str) => str_replace(['\n', '\r', '\t'], ["\n", "\r", "\t"], (string) $str);
         $pieces = [];
         for ($offset = 0; ($string = self::findString($str, $offset, $pos, $quote)) !== false;) {
             $pieces[] = $replace(substr($str, $offset, $pos - $offset));
@@ -99,7 +93,7 @@ class JavaScriptUnpacker
                 for ($matches[$i] = $j = 0, $find = "{$slash}{$quote}", $len = strlen($find);
                     ($pos = strpos($str, $find, $j)) !== false; $j = $pos + $len, $matches[$i] ++);
             }
-            list($x, $y) = $matches;
+            [$x, $y] = $matches;
             if ($x !== $y) {
                 return false;
             }
@@ -120,15 +114,13 @@ class JavaScriptUnpacker
         $packed = " $packed ";
         $base = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
         $encode = function ($count) use (&$encode, $ascii, $base) {
-            return ($count < $ascii ? '' : $encode(intval($count / $ascii))) . $base{$count % $ascii};
+            return ($count < $ascii ? '' : $encode(intval($count / $ascii))) . $base[$count % $ascii];
         };
         $split = '([^a-zA-Z0-9_])';
         while ($count--) {
             if (!empty($keywords[$count])) {
                 $pattern = '/' . $split . preg_quote($encode($count)) . $split . '/';
-                $packed = preg_replace_callback($pattern, function($matches) use ($keywords, $count) {
-                    return $matches[1] . $keywords[$count] . $matches[2];
-                }, $packed);
+                $packed = preg_replace_callback($pattern, fn($matches) => $matches[1] . $keywords[$count] . $matches[2], $packed);
             }
         }
         return substr($packed, 1, -1);
@@ -152,9 +144,7 @@ class JavaScriptUnpacker
             $encoded = $encode($count);
             $decoded[$encoded] = !empty($keywords[$count]) ? $keywords[$count] : $encoded;
         }
-        return preg_replace_callback('/([\xa1-\xff]+)/', function($match) use ($decoded) {
-            return isset($decoded[$match[1]]) ? $decoded[$match[1]] : $match[1];
-        }, $packed);
+        return preg_replace_callback('/([\xa1-\xff]+)/', fn($match) => $decoded[$match[1]] ?? $match[1], $packed);
     }
 
     /**
@@ -165,8 +155,8 @@ class JavaScriptUnpacker
      */
     protected static function isSlashed($buf, $index, $len)
     {
-        if ($buf{$index} === '\\') {
-            if ($len > 1 && $buf{$index - 1} === '\\') {
+        if ($buf[$index] === '\\') {
+            if ($len > 1 && $buf[$index - 1] === '\\') {
                 return self::isSlashed($buf, $index - 2, $len - 2);
             }
             return true;
@@ -185,9 +175,9 @@ class JavaScriptUnpacker
     {
         for ($start = $offset, $len = strlen($buf); $start < $len; $start++) {
             foreach (['"', "'"] as $quote) {
-                if ($buf{$start} === $quote) {
+                if ($buf[$start] === $quote) {
                     for ($i = $start + 1; $i < $len; $i++) {
-                        if ($buf{$i} === $quote && !self::isSlashed($buf, $i - 1, $i - $start - 1)) {
+                        if ($buf[$i] === $quote && !self::isSlashed($buf, $i - 1, $i - $start - 1)) {
                             break;
                         }
                     }
@@ -212,17 +202,17 @@ class JavaScriptUnpacker
     {
         $buf = substr($this->script, $offset);
         $len = strlen($buf);
-        for ($start = 0; $start < $len && $buf{$start} !== $open; $start++);
+        for ($start = 0; $start < $len && $buf[$start] !== $open; $start++);
         for ($i = $start + 1, $skip = 0; $i < $len; $i++) {
-            if ($buf{$i} === $close && 0 === $skip--) {
+            if ($buf[$i] === $close && 0 === $skip--) {
                 break;
             }
             foreach (['"', "'"] as $quote) {
-                if ($buf{$i} === $quote) {
-                    for ($i++; $i < $len && ($buf{$i} !== $quote || $buf{$i - 1} === '\\'); $i++);
+                if ($buf[$i] === $quote) {
+                    for ($i++; $i < $len && ($buf[$i] !== $quote || $buf[$i - 1] === '\\'); $i++);
                 }
             }
-            if ($buf{$i} === $open) {
+            if ($buf[$i] === $open) {
                 $skip++;
             }
         }
@@ -254,7 +244,7 @@ class JavaScriptUnpacker
         if (($pos = strpos(strtolower(preg_replace('/[\x03-\x20]+/', '', $str)), self::$JS_FUNC)) !== false) {
             $start = -1;
             do {
-                while (preg_match('/[\x03-\x20]/', $str{++$start}));
+                while (preg_match('/[\x03-\x20]/', $str[++$start]));
             } while (0 < $pos--);
             return true;
         }
